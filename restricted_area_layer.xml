@@ -1,0 +1,5 @@
+<library path="restricted_costmap_plugin_core">
+  <class name="restricted_costmap_plugin/RestrictedAreaLayer" type="restricted_costmap_plugin::RestrictedAreaLayer" base_class_type="nav2_costmap_2d::Layer">
+    <description>This is a plugin which puts restriction area to costmap</description>
+  </class>
+</library>
