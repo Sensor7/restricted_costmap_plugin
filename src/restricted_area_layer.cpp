@@ -95,15 +95,34 @@ RestrictedAreaLayer::updateBounds(
   double /*robot_x*/, double /*robot_y*/, double /*robot_yaw*/, double * min_x,
   double * min_y, double * max_x, double * max_y)
 {
-  if (!enabled_) return;
-
   if (need_recalculation_) {
-    *min_x = std::min(*min_x, min_x_);
-    *min_y = std::min(*min_y, min_y_);
-    *max_x = std::max(*max_x, max_x_);
-    *max_y = std::max(*max_y, max_y_);
+    last_min_x_ = *min_x;
+    last_min_y_ = *min_y;
+    last_max_x_ = *max_x;
+    last_max_y_ = *max_y;
+    // For some reason when I make these -<double>::max() it does not
+    // work with Costmap2D::worldToMapEnforceBounds(), so I'm using
+    // -<float>::max() instead.
+    *min_x = -std::numeric_limits<float>::max();
+    *min_y = -std::numeric_limits<float>::max();
+    *max_x = std::numeric_limits<float>::max();
+    *max_y = std::numeric_limits<float>::max();
     need_recalculation_ = false;
+  } else {
+    double tmp_min_x = last_min_x_;
+    double tmp_min_y = last_min_y_;
+    double tmp_max_x = last_max_x_;
+    double tmp_max_y = last_max_y_;
+    last_min_x_ = *min_x;
+    last_min_y_ = *min_y;
+    last_max_x_ = *max_x;
+    last_max_y_ = *max_y;
+    *min_x = std::min(tmp_min_x, *min_x);
+    *min_y = std::min(tmp_min_y, *min_y);
+    *max_x = std::max(tmp_max_x, *max_x);
+    *max_y = std::max(tmp_max_y, *max_y);
   }
+
 }
 
 // The method is called when costmap recalculation is required.
@@ -129,12 +148,15 @@ RestrictedAreaLayer::updateCosts(
       double wx, wy;
       master_grid.mapToWorld(i, j, wx, wy);
       if (isPointInPolygon(wx, wy)) {
-        master_array[master_grid.getIndex(i, j)] = nav2_costmap_2d::FREE_SPACE;
+        costmap_[master_grid.getIndex(i, j)] = nav2_costmap_2d::FREE_SPACE;
       } else {
-        master_array[master_grid.getIndex(i, j)] = nav2_costmap_2d::LETHAL_OBSTACLE;
+        costmap_[master_grid.getIndex(i, j)] = nav2_costmap_2d::LETHAL_OBSTACLE;
       }
     }
   }
+
+  updateWithTrueOverwrite(master_grid,min_i,min_j,max_i,max_j);
+  
 }
 
 bool RestrictedAreaLayer::isPointInPolygon(double x, double y)
