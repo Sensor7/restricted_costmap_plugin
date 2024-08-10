@@ -16,6 +16,8 @@
   <depend>pluginlib</depend>
   <depend>rclcpp</depend>
   <depend>geometry_msgs</depend>
+  <depend>stihl_nav_msgs</depend>
+  <depend>std_msgs</depend>
 
   <export>
     <costmap_2d plugin="${prefix}/restricted_area_layer.xml" />

@@ -26,12 +26,16 @@ find_package(rclcpp REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(stihl_nav_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 set(dep_pkgs
     rclcpp
     nav2_costmap_2d
     pluginlib
-    geometry_msgs)
+    geometry_msgs
+    stihl_nav_msgs
+    std_msgs)
 
 # === Build ===
 
