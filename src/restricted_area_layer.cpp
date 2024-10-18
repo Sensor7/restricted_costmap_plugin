@@ -6,6 +6,7 @@
 #include "boost/geometry/geometries/point_xy.hpp"
 #include "boost/geometry/geometries/polygon.hpp"
 #include "boost/geometry/strategies/buffer.hpp"
+#include "Map_service/MapService.hpp"
 
 using nav2_costmap_2d::LETHAL_OBSTACLE;
 using nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE;
@@ -40,11 +41,8 @@ RestrictedAreaLayer::onInitialize()
   node->get_parameter(name_ + "." + "active_topic", active_topic);
   declareParameter("inflation_radius", rclcpp::ParameterValue(inflation_radius_));
   node->get_parameter(name_ + "." + "inflation_radius", inflation_radius_);
-  // Set up the timer to periodically call requestPolygon if client_active_ is false
-  // request_polygon_timer_ = node->create_wall_timer(
-  //   std::chrono::seconds(1),
-  //   std::bind(&RestrictedAreaLayer::requestPolygonCallback, this)
-  // );
+
+  map_service_ = std::make_shared<MapService>(node);
   active_sub_ = node->create_subscription<std_msgs::msg::Bool>(
     active_topic, rclcpp::SystemDefaultsQoS(),
     std::bind(&RestrictedAreaLayer::activeCallback, this, std::placeholders::_1));
@@ -56,14 +54,13 @@ RestrictedAreaLayer::onInitialize()
   current_ = true;
   // client_node = std::make_shared<rclcpp::Node>("restricted_area_client");
   polygon_client_ = node->create_client<stihl_nav_msgs::srv::GetPolygonFromMap>("/global_costmap/get_polygon");
-
-  calculateBounds();
 }
 
 void RestrictedAreaLayer::activeCallback(const std_msgs::msg::Bool::SharedPtr msg)
 {
   client_active_ = msg->data;
   if (client_active_) {
+    RCLCPP_INFO(rclcpp::get_logger("RestrictedAreaLayer"), "get polygon");
     requestPolygon();
   }else{
     area_= geometry_msgs::msg::Polygon();}
@@ -83,16 +80,16 @@ void RestrictedAreaLayer::calculateBounds()
     return;
   }
   // Calculate the min and max x and y bounds from corners
-  min_x_ = std::numeric_limits<double>::max();
-  min_y_ = std::numeric_limits<double>::max();
-  max_x_ = std::numeric_limits<double>::lowest();
-  max_y_ = std::numeric_limits<double>::lowest();
+  last_min_x_ = std::numeric_limits<double>::max();
+  last_min_y_ = std::numeric_limits<double>::max();
+  last_max_x_ = std::numeric_limits<double>::lowest();
+  last_max_y_ = std::numeric_limits<double>::lowest();
 
   for (const auto& point: area_.points) {
-    if (point.x < min_x_) min_x_ = point.x;
-    if (point.x > max_x_) max_x_ = point.x;
-    if (point.y< min_y_) min_y_ = point.y;
-    if (point.y> max_y_) max_y_ = point.y;
+    if (point.x < last_min_x_) last_min_x_ = point.x;
+    if (point.x > last_max_x_) last_max_x_ = point.x;
+    if (point.y< last_min_y_) last_min_y_ = point.y;
+    if (point.y> last_max_y_) last_max_y_ = point.y;
   }
   inflateArea(inflation_radius_);
 }
@@ -109,9 +106,9 @@ void RestrictedAreaLayer::inflateArea(double inflation_radius)
   boost::geometry::correct(original_polygon);
 
   // Inflate the polygon
-  std::vector<BoostPolygon> shrunken_polygons;
+  boost::geometry::model::multi_polygon<BoostPolygon> shrunken_polygons;
   using coordinate_type = boost::geometry::coordinate_type<BoostPoint>::type;
-  boost::geometry::strategy::buffer::distance_symmetric<coordinate_type> distance_strategy(-inflation_radius);
+  boost::geometry::strategy::buffer::distance_symmetric<coordinate_type> distance_strategy(inflation_radius);
   boost::geometry::strategy::buffer::join_round join_strategy(12);
   boost::geometry::strategy::buffer::end_round end_strategy(12);
   boost::geometry::strategy::buffer::point_circle point_strategy(12);
@@ -146,13 +143,11 @@ RestrictedAreaLayer::updateBounds(
     last_min_y_ = *min_y;
     last_max_x_ = *max_x;
     last_max_y_ = *max_y;
-    // For some reason when I make these -<double>::max() it does not
-    // work with Costmap2D::worldToMapEnforceBounds(), so I'm using
-    // -<float>::max() instead.
-    *min_x = -std::numeric_limits<float>::max();
-    *min_y = -std::numeric_limits<float>::max();
-    *max_x = std::numeric_limits<float>::max();
-    *max_y = std::numeric_limits<float>::max();
+
+    *min_x = std::numeric_limits<double>::lowest();
+    *min_y = std::numeric_limits<double>::lowest();
+    *max_x = std::numeric_limits<double>::max();
+    *max_y = std::numeric_limits<double>::max();
     need_recalculation_ = false;
   } else {
     double tmp_min_x = last_min_x_;
@@ -197,11 +192,8 @@ RestrictedAreaLayer::updateCosts(
     for (int i = min_i; i < max_i; i++) {
       double wx, wy;
       master_grid.mapToWorld(i, j, wx, wy);
-      if (!isPointInPolygon(wx, wy,area_)) {
+      if (!isPointInPolygon(wx, wy,area_)&&isPointInPolygon(wx, wy,inflated_area_)) {
         master_array[master_grid.getIndex(i, j)] = nav2_costmap_2d::LETHAL_OBSTACLE;
-      }
-      else if(!isPointInPolygon(wx, wy,inflated_area_)){
-        master_array[master_grid.getIndex(i, j)] = nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE;
       }
     }
   }
@@ -229,8 +221,6 @@ void RestrictedAreaLayer::onFootprintChanged()
 
 void RestrictedAreaLayer::requestPolygon()
 { 
-  
-  // if (polygon_client_->wait_for_service(std::chrono::seconds(1))){
   while (!polygon_client_->wait_for_service(std::chrono::seconds(3))) {
     if (!rclcpp::ok()) {
       RCLCPP_ERROR(node->get_logger(), "Interrupted while waiting for the service. Exiting.");
@@ -240,17 +230,19 @@ void RestrictedAreaLayer::requestPolygon()
   }
   auto polygon_request = std::make_shared<stihl_nav_msgs::srv::GetPolygonFromMap::Request>();
   using ServiceResponseFuture = rclcpp::Client<stihl_nav_msgs::srv::GetPolygonFromMap>::SharedFuture;
+  RCLCPP_INFO(node->get_logger(), "Sending request");
   auto response_received_callback=[this](ServiceResponseFuture future)
   {
     auto response = future.get();
     if (client_active_) {
     area_ = response->polygon;
+    RCLCPP_INFO(rclcpp::get_logger("RestrictedAreaLayer"), "Polygon received");
     need_recalculation_ = true;
     calculateBounds();
     }
   };
   auto polygon_future = polygon_client_->async_send_request(polygon_request,response_received_callback);
-
+  RCLCPP_INFO(node->get_logger(), "Request sent");
 }
 
 

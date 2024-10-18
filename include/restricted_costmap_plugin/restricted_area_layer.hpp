@@ -10,6 +10,7 @@
 #include "stihl_nav_msgs/srv/get_polygon_from_map.hpp" 
 #include <vector>
 #include "std_msgs/msg/bool.hpp"
+#include "Map_service/MapService.hpp"
 
 namespace restricted_costmap_plugin
 {
@@ -54,15 +55,15 @@ private:
   rclcpp::Client<stihl_nav_msgs::srv::GetPolygonFromMap>::SharedPtr polygon_client_;
   rclcpp::TimerBase::SharedPtr request_polygon_timer_;
   std::shared_ptr<rclcpp_lifecycle::LifecycleNode> node;
-  // std::shared_ptr<rclcpp::Node> client_node;
 
 
-  double min_x_, min_y_, max_x_, max_y_;
+  // double min_x_, min_y_, max_x_, max_y_;
   bool need_recalculation_;
   bool enabled_;
   bool client_active_;
   double inflation_radius_;
   double last_min_x_, last_min_y_, last_max_x_, last_max_y_;
+  std::shared_ptr<MapService> map_service_;
 };
 
 }  // namespace restricted_costmap_plugin

@@ -40,7 +40,8 @@ set(dep_pkgs
 # === Build ===
 
 add_library(${lib_name} SHARED
-            src/restricted_area_layer.cpp)
+            src/restricted_area_layer.cpp
+            src/MapService.cpp)
 include_directories(include)
 
 # === Installation ===
